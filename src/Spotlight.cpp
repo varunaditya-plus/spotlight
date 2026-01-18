@@ -3,12 +3,16 @@
 #include "actions/search.h"
 #include "searches/searches.h"
 #include "searches/apps.h"
+#include "spotlightapps/spotlightapp.h"
+#include "spotlightapps/demo/demoapp.h"
+#include "spotlightapps/utils.h"
+#include <QHash>
+#include <QList>
 #include <QKeyEvent>
 #include <QLineEdit>
 #include <QVBoxLayout>
 #include <QMouseEvent>
 #include <QProcess>
-#include <QFileInfo>
 #include <QFrame>
 #include <QSizePolicy>
 #include <QScrollArea>
@@ -19,6 +23,11 @@
 #include <QFontMetrics>
 #include <QSpacerItem>
 #include <vector>
+
+// Spotlight apps
+static const QList<SpotlightAppInfo> SPOTLIGHT_APPS = {
+  SpotlightAppInfo("demo", "Font Demo", "Preview system fonts")
+};
 
 Spotlight::Spotlight(QWidget* parent)
   : QDialog(parent)
@@ -86,6 +95,25 @@ Spotlight::Spotlight(QWidget* parent)
   m_input->installEventFilter(this);
   inputLayout->addWidget(m_input);
   
+  // back button (only shown in menu mode)
+  m_backButton = new QPushButton("← Back", m_inputContainer);
+  m_backButton->setStyleSheet(
+    "QPushButton {"
+    "  font-size: 18px;"
+    "  padding: 0px;"
+    "  color: white;"
+    "  background: transparent;"
+    "  border: none;"
+    "  text-align: left;"
+    "}"
+  );
+  m_backButton->setCursor(Qt::PointingHandCursor);
+  m_backButton->setFocusPolicy(Qt::StrongFocus);
+  m_backButton->hide();
+  m_backButton->installEventFilter(this);
+  connect(m_backButton, &QPushButton::clicked, this, &Spotlight::onMenuBackClicked);
+  inputLayout->addWidget(m_backButton);
+  
   layout->addWidget(m_inputContainer);
   
   // results container with scroll area
@@ -144,11 +172,16 @@ Spotlight::Spotlight(QWidget* parent)
   // initialize apps search
   m_appsSearch = new AppsSearch(this);
   
+  // spotlight apps (add more later)
+  registerSpotlightApp("demo", new DemoApp());
+  
   connect(m_input, &QLineEdit::textChanged, this, &Spotlight::onTextChanged);
 }
 
 void Spotlight::onTextChanged(const QString& text)
 {
+  if (m_menuMode) return;
+  
   if (text.isEmpty()) {
     clearActions();
   } else {
@@ -162,11 +195,42 @@ void Spotlight::updateActions(const QString& query)
   
   // app search
   std::vector<SearchResult> appResults = m_appsSearch->performSearch(query);
+  
+  // add spotlight apps using registry
+  QString lowerQuery = query.toLower();
+  for (const SpotlightAppInfo& appInfo : SPOTLIGHT_APPS) {
+    if (!m_spotlightApps.contains(appInfo.identifier)) continue;
+    
+    int score = 0;
+    QString appNameLower = appInfo.name.toLower();
+    QString appDescLower = appInfo.description.toLower();
+    
+    // scoring based on query match
+    if (appNameLower.contains(lowerQuery) || appDescLower.contains(lowerQuery)) {
+      if (appNameLower.contains(lowerQuery)) {
+        score = 90; // name match is higher priority
+      } else {
+        score = 70; // description match
+      }
+    } else if (query.isEmpty() || lowerQuery.length() < 2) {
+      score = 50; // show for very short/empty queries
+    }
+    
+    if (score > 0) {
+      SearchResult spotlightAppResult;
+      spotlightAppResult.name = appInfo.name;
+      spotlightAppResult.description = appInfo.description;
+      spotlightAppResult.exec = "spotlightapp:" + appInfo.identifier;
+      spotlightAppResult.score = score;
+      appResults.insert(appResults.begin(), spotlightAppResult);
+    }
+  }
+  
   m_currentSearchResults = appResults;
   
   // create buttons for search results
   for (int i = 0; i < appResults.size(); ++i) {
-    createSearchResultButton(appResults[i], i);
+    createItemButton(appResults[i].name, appResults[i].description, i, false);
   }
   
   // create actions
@@ -236,104 +300,134 @@ void Spotlight::clearActions()
 
 void Spotlight::navigateActions(int direction)
 {
-  int totalItems = m_searchResults.size() + m_actions.size();
-  if (totalItems == 0) return;
+  if (m_menuMode) {
+    // navigate menu items
+    int totalItems = static_cast<int>(m_menuItems.size());
+    if (totalItems == 0) return;
+    
+    int newIndex = m_selectedActionIndex + direction;
+    if (newIndex < 0) { newIndex = totalItems - 1; }
+    else if (newIndex >= totalItems) { newIndex = 0; }
+    
+    selectAction(newIndex);
+  } else {
+    // navigate search results
+    int totalItems = m_searchResults.size() + m_actions.size();
+    if (totalItems == 0) return;
+    
+    int newIndex = m_selectedActionIndex + direction;
+    if (newIndex < 0) { newIndex = totalItems - 1; }
+    else if (newIndex >= totalItems) { newIndex = 0; }
+    
+    selectAction(newIndex);
+  }
+}
+
+QPushButton* Spotlight::getButtonAt(int index)
+{
+  if (m_menuMode) {
+    if (index >= 0 && index < static_cast<int>(m_menuItems.size())) {
+      return m_menuItems[index];
+    }
+  } else {
+    if (index < m_searchResults.size()) {
+      return m_searchResults[index];
+    } else if (index < m_searchResults.size() + m_actions.size()) {
+      return m_actions[index - m_searchResults.size()];
+    }
+  }
+  return nullptr;
+}
+
+void Spotlight::applyButtonStyle(QPushButton* button, bool selected)
+{
+  if (!button) return;
   
-  int newIndex = m_selectedActionIndex + direction;
-  if (newIndex < 0) { newIndex = totalItems - 1; }
-  else if (newIndex >= totalItems) { newIndex = 0; }
+  QWidget* widget = qobject_cast<QWidget*>(button);
+  bool isWidgetButton = (widget && (widget->property("isMenuItem").toBool() || 
+                                    widget->property("isResultButton").toBool()));
   
-  selectAction(newIndex);
+  if (isWidgetButton) {
+    SpotlightMenuUtils::styleMenuItemWidget(widget, selected);
+  } else {
+    QString style = QString(
+      "QPushButton {"
+      "  font-size: 16px;"
+      "  padding: 12px 16px;"
+      "  color: white;"
+      "  background: %1;"
+      "  border: none;"
+      "  text-align: left;"
+      "}").arg(selected ? "rgba(100, 150, 255, 80)" : "transparent");
+    button->setStyleSheet(style);
+  }
 }
 
 void Spotlight::selectAction(int index)
 {
-  int totalItems = m_searchResults.size() + m_actions.size();
+  int totalItems = m_menuMode ? static_cast<int>(m_menuItems.size()) : 
+                                (m_searchResults.size() + m_actions.size());
   if (index < 0 || index >= totalItems) return;
-  
-  // get button to style
-  QPushButton* prevButton = nullptr;
-  QPushButton* newButton = nullptr;
   
   // deselect previous
   if (m_selectedActionIndex >= 0 && m_selectedActionIndex < totalItems) {
-    if (m_selectedActionIndex < m_searchResults.size()) {
-      prevButton = m_searchResults[m_selectedActionIndex];
-    } else {
-      prevButton = m_actions[m_selectedActionIndex - m_searchResults.size()];
-    }
+    QPushButton* prevButton = getButtonAt(m_selectedActionIndex);
+    applyButtonStyle(prevButton, false);
   }
   
-  // select new
-  if (index < m_searchResults.size()) {
-    newButton = m_searchResults[index];
-  } else {
-    newButton = m_actions[index - m_searchResults.size()];
-  }
-  
-  // apply base style to previous button
-  if (prevButton) {
-    QWidget* prevWidget = qobject_cast<QWidget*>(prevButton);
-    if (prevWidget && prevWidget->property("isResultButton").toBool()) {
-      // result widget
-      prevWidget->setStyleSheet(
-        "QWidget {"
-        "  background: transparent;"
-        "}"
-      );
-    } else {
-      // regular action button
-      QString baseStyle = 
-        "QPushButton {"
-        "  font-size: 16px;"
-        "  padding: 12px 16px;"
-        "  color: white;"
-        "  background: transparent;"
-        "  border: none;"
-        "  text-align: left;"
-        "}";
-      prevButton->setStyleSheet(baseStyle);
-    }
-  }
-  
-  // apply selected style to new button
   m_selectedActionIndex = index;
+  QPushButton* newButton = getButtonAt(index);
   if (newButton) {
     QWidget* newWidget = qobject_cast<QWidget*>(newButton);
-    if (newWidget && newWidget->property("isResultButton").toBool()) {
-      // result widget
-      newWidget->setStyleSheet(
-        "QWidget {"
-        "  background: rgba(100, 150, 255, 80);"
-        "}"
-      );
+    bool isWidgetButton = (newWidget && (newWidget->property("isMenuItem").toBool() || 
+                                         newWidget->property("isResultButton").toBool()));
+    if (isWidgetButton) {
+      SpotlightMenuUtils::styleMenuItemWidget(newWidget, true);
     } else {
-      QString selectedStyle = 
-        "QPushButton {"
-        "  font-size: 16px;"
-        "  padding: 12px 16px;"
-        "  color: white;"
-        "  background: rgba(100, 150, 255, 80);"
-        "  border: none;"
-        "  text-align: left;"
-        "}";
-      newButton->setStyleSheet(selectedStyle);
+      applyButtonStyle(newButton, true);
     }
   }
   
-  // keep focus on input field
+  if (m_menuMode) {
+    m_backButton->setFocus();
+  } else {
+    m_input->setFocus();
+  }
 }
 
 void Spotlight::onActionExecuted() { close(); }
 
 bool Spotlight::eventFilter(QObject* obj, QEvent* event)
 {
+  // keyboard events on back button (menu mode)
+  if (obj == m_backButton && m_menuMode) {
+    if (event->type() == QEvent::KeyPress) {
+      auto* keyEvent = static_cast<QKeyEvent*>(event);
+      if (keyEvent->key() == Qt::Key_Escape || keyEvent->key() == Qt::Key_Return || keyEvent->key() == Qt::Key_Enter) {
+        exitMenuMode();
+        return true;
+      }
+      else if (keyEvent->key() == Qt::Key_Down) {
+        navigateActions(1);
+        return true;
+      }
+      else if (keyEvent->key() == Qt::Key_Up) {
+        navigateActions(-1);
+        return true;
+      }
+    }
+  }
+  
   // keyboard events on input
   if (obj == m_input) {
     if (event->type() == QEvent::KeyPress) {
       auto* keyEvent = static_cast<QKeyEvent*>(event);
       if (keyEvent->key() == Qt::Key_Escape) {
-        close();
+        if (m_menuMode) {
+          exitMenuMode();
+        } else {
+          close();
+        }
         return true;
       }
       else if (keyEvent->key() == Qt::Key_Down) {
@@ -345,17 +439,32 @@ bool Spotlight::eventFilter(QObject* obj, QEvent* event)
         return true;
       }
       else if (keyEvent->key() == Qt::Key_Return || keyEvent->key() == Qt::Key_Enter) {
-        int totalItems = m_searchResults.size() + m_actions.size();
-        if (m_selectedActionIndex >= 0 && m_selectedActionIndex < totalItems) {
-          if (m_selectedActionIndex < m_searchResults.size()) {
-            // search result
-            launchApp(m_currentSearchResults[m_selectedActionIndex]);
-          } else {
-            // action
-            QString query = m_input->text();
-            m_actions[m_selectedActionIndex - m_searchResults.size()]->execute(query);
+        if (m_menuMode) {
+          // menu mode - handle menu item selection
+          int totalItems = static_cast<int>(m_menuItems.size());
+          if (m_selectedActionIndex >= 0 && m_selectedActionIndex < totalItems) {
+            onMenuItemClicked(m_selectedActionIndex);
           }
-          close();
+          return true;
+        } else {
+          // search mode
+          int totalItems = m_searchResults.size() + m_actions.size();
+          if (m_selectedActionIndex >= 0 && m_selectedActionIndex < totalItems) {
+            if (m_selectedActionIndex < m_searchResults.size()) {
+              // search result
+              SearchResult result = m_currentSearchResults[m_selectedActionIndex];
+              launchApp(result);
+              // Don't close if spotlight app (menu mode)
+              if (!result.exec.startsWith("spotlightapp:")) {
+                close();
+              }
+            } else {
+              // action
+              QString query = m_input->text();
+              m_actions[m_selectedActionIndex - m_searchResults.size()]->execute(query);
+              close();
+            }
+          }
           return true;
         }
       }
@@ -369,8 +478,26 @@ bool Spotlight::eventFilter(QObject* obj, QEvent* event)
       if (mouseEvent->button() == Qt::LeftButton) {
         int index = obj->property("resultIndex").toInt();
         if (index >= 0 && index < static_cast<int>(m_currentSearchResults.size())) {
-          launchApp(m_currentSearchResults[index]);
-          close();
+          SearchResult result = m_currentSearchResults[index];
+          launchApp(result);
+          // Don't close if it's a spotlight app (menu mode)
+          if (!result.exec.startsWith("spotlightapp:")) {
+            close();
+          }
+        }
+        return true;
+      }
+    }
+  }
+  
+  // Click events on menu item buttons
+  if (obj->property("isMenuItem").toBool()) {
+    if (event->type() == QEvent::MouseButtonPress) {
+      auto* mouseEvent = static_cast<QMouseEvent*>(event);
+      if (mouseEvent->button() == Qt::LeftButton) {
+        int index = obj->property("itemIndex").toInt();
+        if (index >= 0 && index < static_cast<int>(m_currentMenuItems.size())) {
+          onMenuItemClicked(index);
         }
         return true;
       }
@@ -416,67 +543,44 @@ bool Spotlight::eventFilter(QObject* obj, QEvent* event)
   return QDialog::eventFilter(obj, event);
 }
 
-void Spotlight::createSearchResultButton(const SearchResult& result, int index)
+void Spotlight::createItemButton(const QString& title, const QString& description, int index, bool isMenuItem, const QFont& font)
 {
-  // create clickable widget
-  QWidget* buttonWidget = new QWidget(m_actionsContainer);
-  buttonWidget->setCursor(Qt::PointingHandCursor);
-  
-  // create horizontal layout
-  QHBoxLayout* contentLayout = new QHBoxLayout(buttonWidget);
-  contentLayout->setContentsMargins(16, 12, 16, 12);
-  contentLayout->setSpacing(8);
-  
-  // name label with ellipsis
-  QLabel* nameLabel = new QLabel(result.name, buttonWidget);
-  nameLabel->setStyleSheet(
-    "QLabel {"
-    "  color: white;"
-    "  font-size: 16px;"
-    "  background: transparent;"
-    "}"
-  );
-  nameLabel->setTextFormat(Qt::PlainText);
-  QFontMetrics nameMetrics(nameLabel->font());
-  QString elidedName = nameMetrics.elidedText(result.name, Qt::ElideRight, 300);
-  nameLabel->setText(elidedName);
-  nameLabel->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Preferred);
-  contentLayout->addWidget(nameLabel, 0);
-  
-  // description label with ellipsis
-  if (!result.description.isEmpty()) {
-    QLabel* descLabel = new QLabel(result.description, buttonWidget);
-    descLabel->setStyleSheet(
-      "QLabel {"
-      "  color: rgba(255, 255, 255, 140);"
-      "  font-size: 14px;"
-      "  background: transparent;"
-      "}"
-    );
-    descLabel->setTextFormat(Qt::PlainText);
-    QFontMetrics descMetrics(descLabel->font());
-    QString elidedDesc = descMetrics.elidedText(result.description, Qt::ElideRight, 300);
-    descLabel->setText(elidedDesc);
-    descLabel->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
-    contentLayout->addWidget(descLabel, 1);
-  } else {
-    // add spacer if no description
-    contentLayout->addItem(new QSpacerItem(0, 0, QSizePolicy::Expanding, QSizePolicy::Minimum));
-  }
+  QWidget* buttonWidget = SpotlightMenuUtils::createMenuItemWidget(m_actionsContainer, title, description, font);
   
   // make it clickable
   buttonWidget->installEventFilter(this);
-  buttonWidget->setProperty("isResultButton", true);
-  buttonWidget->setProperty("resultIndex", index);
-  
-  // store as QPushButton* for compatibility
-  m_searchResults.append(reinterpret_cast<QPushButton*>(buttonWidget));
+  if (isMenuItem) {
+    buttonWidget->setProperty("isMenuItem", true);
+    buttonWidget->setProperty("itemIndex", index);
+    m_menuItems.append(reinterpret_cast<QPushButton*>(buttonWidget));
+  } else {
+    buttonWidget->setProperty("isResultButton", true);
+    buttonWidget->setProperty("resultIndex", index);
+    m_searchResults.append(reinterpret_cast<QPushButton*>(buttonWidget));
+  }
   m_actionsLayout->addWidget(buttonWidget);
+}
+
+
+void Spotlight::registerSpotlightApp(const QString& appName, SpotlightApp* app)
+{
+  m_spotlightApps[appName] = app;
 }
 
 void Spotlight::launchApp(const SearchResult& result)
 {
   if (result.exec.isEmpty()) return;
+  
+  // check if this is a spotlight app
+  if (result.exec.startsWith("spotlightapp:")) {
+    QString appName = result.exec.mid(13); // remove "spotlightapp:" prefix
+    
+    if (m_spotlightApps.contains(appName)) {
+      SpotlightApp* app = m_spotlightApps[appName];
+      showMenuMode(app->getMenuItems());
+      return;
+    }
+  }
   
   QString execCmd = result.exec;
   
@@ -493,4 +597,72 @@ void Spotlight::launchApp(const SearchResult& result)
   QProcess::startDetached("bash", QStringList() << "-c" << execCmd);
   
   emit onActionExecuted();
+}
+
+void Spotlight::showMenuMode(const std::vector<MenuItem>& items)
+{
+  m_menuMode = true;
+  m_currentMenuItems = items;
+  
+  // switch ui to menu mode: hide input, show back button
+  m_input->hide();
+  m_input->clear();
+  m_backButton->show();
+  
+  clearActions();
+  
+  // create menu item buttons
+  for (size_t i = 0; i < items.size(); ++i) {
+    createItemButton(items[i].title, items[i].description, static_cast<int>(i), true, items[i].font);
+  }
+  
+  // show menu
+  int totalItems = static_cast<int>(items.size());
+  if (totalItems > 0) {
+    m_scrollArea->show();
+    
+    m_actionsContainer->updateGeometry();
+    m_actionsLayout->update();
+    m_actionsContainer->adjustSize();
+    
+    int contentHeight = m_actionsContainer->sizeHint().height();
+    if (contentHeight == 0) { contentHeight = totalItems * 50; }
+    
+    int resultsHeight = qMin(contentHeight, m_maxResultsHeight);
+    m_scrollArea->setMaximumHeight(resultsHeight);
+    
+    int windowHeight = 32 + 60 + 8 + resultsHeight;
+    setFixedSize(700, windowHeight);
+    
+    if (m_positionInitialized) { move(m_fixedPosition); }
+    
+    selectAction(0);
+  }
+  
+  m_backButton->setFocus();
+}
+
+void Spotlight::exitMenuMode()
+{
+  m_menuMode = false;
+  
+  // switch ui to menu mode: hide back button, show input
+  m_backButton->hide();
+  m_input->show();
+  m_input->clear();
+  m_input->setFocus();
+  
+  clearActions();
+  m_menuItems.clear();
+  m_currentMenuItems.clear();
+}
+
+void Spotlight::onMenuBackClicked()
+{ exitMenuMode(); }
+
+void Spotlight::onMenuItemClicked(int index)
+{
+  if (index < 0 || index >= static_cast<int>(m_currentMenuItems.size())) return;
+  if (m_currentMenuItems[index].action) { m_currentMenuItems[index].action(); }
+  // stay in menu mode so user can select more items
 }
