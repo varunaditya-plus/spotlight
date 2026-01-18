@@ -202,7 +202,16 @@ void Spotlight::onTextChanged(const QString& text)
 
 void Spotlight::updateActions(const QString& query)
 {
-  clearActions();
+  // clear widgets without ui updates
+  QLayoutItem* item;
+  while ((item = m_actionsLayout->takeAt(0)) != nullptr) {
+    delete item->widget();
+    delete item;
+  }
+  m_actions.clear();
+  m_searchResults.clear();
+  m_currentSearchResults.clear();
+  m_selectedActionIndex = -1;
   
   std::vector<SearchResult> allResults;
   
@@ -250,6 +259,17 @@ void Spotlight::updateActions(const QString& query)
   // Create search action
   auto* searchAction = new SearchAction(m_actionsContainer);
   searchAction->setText("Search " + query);
+  searchAction->setMinimumHeight(48);
+  searchAction->setStyleSheet(
+    "QPushButton {"
+    "  font-size: 16px;"
+    "  padding: 12px 16px;"
+    "  color: white;"
+    "  background: transparent;"
+    "  border: none;"
+    "  text-align: left;"
+    "}"
+  );
   connect(searchAction, &Action::actionExecuted, this, &Spotlight::onActionExecuted);
   connect(searchAction, &QPushButton::clicked, [this, searchAction]() {
     searchAction->execute(m_input->text());
@@ -264,6 +284,11 @@ void Spotlight::updateActions(const QString& query)
     updateBorderRadius(true);
     updateWindowSize(calculateResultsHeight(totalItems));
     selectAction(0);
+  } else {
+    m_scrollArea->hide();
+    updateBorderRadius(false);
+    setFixedSize(WINDOW_WIDTH, m_baseHeight);
+    if (m_positionInitialized) { move(m_fixedPosition); }
   }
   m_input->setFocus();
 }
@@ -649,17 +674,12 @@ void Spotlight::updateBorderRadius(bool hasResults)
 
 int Spotlight::calculateResultsHeight(int totalItems)
 {
-  m_actionsContainer->updateGeometry();
-  m_actionsLayout->update();
-  m_actionsContainer->adjustSize();
+  if (totalItems == 0) return 0;
   
-  int contentHeight = m_actionsContainer->sizeHint().height();
-  if (contentHeight == 0) {
-    contentHeight = totalItems * 50; // approx height per item
-  }
+  // each item is 48px tall
+  int contentHeight = totalItems * 48;
   
-  int resultsHeight = qMin(contentHeight, m_maxResultsHeight);
-  return qMax(resultsHeight, 1); // Minimum 1px to prevent layout issues
+  return qMin(contentHeight, m_maxResultsHeight);
 }
 
 void Spotlight::updateWindowSize(int resultsHeight)
