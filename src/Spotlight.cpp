@@ -478,20 +478,6 @@ void Spotlight::launchApp(const SearchResult& result)
 {
   if (result.exec.isEmpty()) return;
   
-  // use desktop file if available
-  if (!result.data.isEmpty() && result.data.endsWith(".desktop")) {
-    QFileInfo fileInfo(result.data);
-    QString basename = fileInfo.baseName();
-    
-    // try gtk-launch first
-    bool launched = QProcess::startDetached("gtk-launch", QStringList() << basename);
-    if (launched) {
-      emit onActionExecuted();
-      return;
-    }
-  }
-  
-  // fallback: use exec command directly
   QString execCmd = result.exec;
   
   // remove desktop file % codes
@@ -503,18 +489,8 @@ void Spotlight::launchApp(const SearchResult& result)
   execCmd.replace("%c", result.name);
   execCmd.replace("%k", "");
   
-  // split into command and arguments
-  QStringList parts = execCmd.split(" ", Qt::SkipEmptyParts);
-  if (!parts.isEmpty()) {
-    QString program = parts[0];
-    QStringList args;
-    for (int i = 1; i < parts.size(); ++i) {
-      if (!parts[i].startsWith("%")) {
-        args << parts[i];
-      }
-    }
-    QProcess::startDetached(program, args);
-  }
+  // launch via bash to use correct shell environment
+  QProcess::startDetached("bash", QStringList() << "-c" << execCmd);
   
   emit onActionExecuted();
 }

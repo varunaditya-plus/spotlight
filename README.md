@@ -1,6 +1,6 @@
 <div align="center">
 
-# Spotlight
+# Spotlight Search (for linux)
 
 This project is my **spotlight search** made for linux using C++ and Qt-6
 
