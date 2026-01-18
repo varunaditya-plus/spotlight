@@ -3,11 +3,11 @@
 # Spotlight Search (for linux)
 
 This project is my **spotlight search** made for linux using C++ and Qt-6</br>
-I made this for myself, and I use Bazzite/Gnome. Compatibility with more desktops/distros is coming soon.
 
 
 Right now this project is in it's early stages. I made this to be a spotlight search/powertoys run alternative for</br>
-linux. I know [Vicinae](https://github.com/vicinaehq/vicinae) already exists, but I personally don't like it due to the lack of a bunch of features.
+linux. I know [Vicinae](https://github.com/vicinaehq/vicinae) already exists, but I personally don't like it due to the lack of a bunch of features. I</br>
+made this for myself, and I use Bazzite/Gnome. Compatibility with more desktops/distros is coming soon.
 
 [Installation](#installation) •
 [About](#about)
