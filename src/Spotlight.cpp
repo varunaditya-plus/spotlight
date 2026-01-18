@@ -133,6 +133,10 @@ Spotlight::Spotlight(QWidget* parent)
     "QScrollArea {"
     "  background: transparent;"
     "  border: none;"
+    "  border-radius: 0px;"
+    "}"
+    "QScrollArea > QWidget > QWidget {"
+    "  border-radius: 0px;"
     "}"
     "QScrollBar:vertical {"
     "  background: rgba(255, 255, 255, 15);"
@@ -154,6 +158,7 @@ Spotlight::Spotlight(QWidget* parent)
     "QWidget {"
     "  background: transparent;"
     "  border: none;"
+    "  border-radius: 0px;"
     "}"
   );
   m_actionsLayout = new QVBoxLayout(m_actionsContainer);
