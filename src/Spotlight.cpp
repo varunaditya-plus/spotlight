@@ -64,19 +64,25 @@ Spotlight::Spotlight(QWidget* parent)
   
   auto* layout = new QVBoxLayout(this);
   layout->setContentsMargins(16, 16, 16, 16);
-  layout->setSpacing(8);
+  layout->setSpacing(0);
   
-  // draggable container
-  m_inputContainer = new QWidget(this);
+  m_unifiedContainer = new QWidget(this);
+  updateBorderRadius(false);
+  m_unifiedContainer->installEventFilter(this);
+  
+  m_unifiedLayout = new QVBoxLayout(m_unifiedContainer);
+  m_unifiedLayout->setContentsMargins(0, 0, 0, 0);
+  m_unifiedLayout->setSpacing(0);
+  
+  m_inputContainer = new QWidget(m_unifiedContainer);
   m_inputContainer->setStyleSheet(
     "QWidget {"
-    "  background: rgba(40, 40, 40, 250);"
-    "  border-radius: 28px;"
+    "  background: transparent;"
+    "  border: none;"
     "}"
   );
   m_inputContainer->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
-  m_inputContainer->setFixedHeight(60);
-  m_inputContainer->installEventFilter(this);
+  m_inputContainer->setFixedHeight(SEARCH_BOX_HEIGHT);
   
   auto* inputLayout = new QVBoxLayout(m_inputContainer);
   inputLayout->setContentsMargins(20, 16, 20, 16);
@@ -116,10 +122,9 @@ Spotlight::Spotlight(QWidget* parent)
   connect(m_backButton, &QPushButton::clicked, this, &Spotlight::onMenuBackClicked);
   inputLayout->addWidget(m_backButton);
   
-  layout->addWidget(m_inputContainer);
+  m_unifiedLayout->addWidget(m_inputContainer);
   
-  // results container with scroll area
-  QScrollArea* scrollArea = new QScrollArea(this);
+  QScrollArea* scrollArea = new QScrollArea(m_unifiedContainer);
   scrollArea->setWidgetResizable(true);
   scrollArea->setFrameShape(QFrame::NoFrame);
   scrollArea->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
@@ -147,8 +152,8 @@ Spotlight::Spotlight(QWidget* parent)
   m_actionsContainer = new QWidget();
   m_actionsContainer->setStyleSheet(
     "QWidget {"
-    "  background: rgba(40, 40, 40, 250);"
-    "  border-radius: 12px;"
+    "  background: transparent;"
+    "  border: none;"
     "}"
   );
   m_actionsLayout = new QVBoxLayout(m_actionsContainer);
@@ -158,26 +163,22 @@ Spotlight::Spotlight(QWidget* parent)
   scrollArea->setWidget(m_actionsContainer);
   scrollArea->hide();
   m_scrollArea = scrollArea;
-  layout->addWidget(scrollArea);
+  m_unifiedLayout->addWidget(scrollArea);
   
-  // set fixed size and center on screen
-  // base height = margins (32) + search box (60) = 92
-  m_baseHeight = 92;
-  setFixedSize(700, m_baseHeight);
+  layout->addWidget(m_unifiedContainer);
+  
+  // set base height using variables
+  m_baseHeight = MARGIN_TOP + SEARCH_BOX_HEIGHT + MARGIN_BOTTOM;
+  setFixedSize(WINDOW_WIDTH, m_baseHeight);
   QScreen* screen = QApplication::primaryScreen();
   QRect screenGeometry = screen->geometry();
-  QPoint center = screenGeometry.center() - QPoint(350, m_baseHeight / 2);
+  QPoint center = screenGeometry.center() - QPoint(WINDOW_WIDTH / 2, m_baseHeight / 2);
   move(center);
   m_fixedPosition = center;
   m_positionInitialized = true;
   
-  // initialize apps search
   m_appsSearch = new AppsSearch(this);
-  
-  // initialize settings search
   m_settingsSearch = new SettingsSearch(this);
-  
-  // spotlight apps (add more later)
   registerSpotlightApp("demo", new DemoApp());
   
   connect(m_input, &QLineEdit::textChanged, this, &Spotlight::onTextChanged);
@@ -198,14 +199,11 @@ void Spotlight::updateActions(const QString& query)
 {
   clearActions();
   
-  // app search
-  std::vector<SearchResult> appResults = m_appsSearch->performSearch(query);
-  
-  // settings search
-  std::vector<SearchResult> settingsResults = m_settingsSearch->performSearch(query);
-  
-  // combine all results
   std::vector<SearchResult> allResults;
+  
+  // app & settings search
+  std::vector<SearchResult> settingsResults = m_settingsSearch->performSearch(query);
+  std::vector<SearchResult> appResults = m_appsSearch->performSearch(query);
   allResults.insert(allResults.end(), settingsResults.begin(), settingsResults.end());
   allResults.insert(allResults.end(), appResults.begin(), appResults.end());
   
@@ -214,84 +212,54 @@ void Spotlight::updateActions(const QString& query)
   for (const SpotlightAppInfo& appInfo : SPOTLIGHT_APPS) {
     if (!m_spotlightApps.contains(appInfo.identifier)) continue;
     
-    int score = 0;
     QString appNameLower = appInfo.name.toLower();
     QString appDescLower = appInfo.description.toLower();
+    int score = 0;
     
-    // scoring based on query match
-    if (appNameLower.contains(lowerQuery) || appDescLower.contains(lowerQuery)) {
-      if (appNameLower.contains(lowerQuery)) {
-        score = 90; // name match is higher priority
-      } else {
-        score = 70; // description match
-      }
+    if (appNameLower.contains(lowerQuery)) {
+      score = 90;
+    } else if (appDescLower.contains(lowerQuery)) {
+      score = 70;
     } else if (query.isEmpty() || lowerQuery.length() < 2) {
-      score = 50; // show for very short/empty queries
+      score = 50;
     }
     
     if (score > 0) {
-      SearchResult spotlightAppResult;
-      spotlightAppResult.name = appInfo.name;
-      spotlightAppResult.description = appInfo.description;
-      spotlightAppResult.exec = "spotlightapp:" + appInfo.identifier;
-      spotlightAppResult.score = score;
-      allResults.push_back(spotlightAppResult);
+      SearchResult result;
+      result.name = appInfo.name;
+      result.description = appInfo.description;
+      result.exec = "spotlightapp:" + appInfo.identifier;
+      result.score = score;
+      allResults.push_back(result);
     }
   }
   
-  // sort all results by score (highest first)
   std::sort(allResults.begin(), allResults.end());
-  
   m_currentSearchResults = allResults;
   
-  // create buttons for search results
-  for (int i = 0; i < allResults.size(); ++i) {
-    createItemButton(allResults[i].name, allResults[i].description, i, false);
+  // Create result buttons
+  for (size_t i = 0; i < allResults.size(); ++i) {
+    createItemButton(allResults[i].name, allResults[i].description, static_cast<int>(i), false);
   }
   
-  // create actions
+  // Create search action
   auto* searchAction = new SearchAction(m_actionsContainer);
   searchAction->setText("Search " + query);
   connect(searchAction, &Action::actionExecuted, this, &Spotlight::onActionExecuted);
   connect(searchAction, &QPushButton::clicked, [this, searchAction]() {
-    QString query = m_input->text();
-    searchAction->execute(query);
+    searchAction->execute(m_input->text());
   });
   m_actions.append(searchAction);
   m_actionsLayout->addWidget(searchAction);
   
-  // calculate total items
+  // Show results if any
   int totalItems = m_searchResults.size() + m_actions.size();
-  
-  // show actions and lower area
-  m_scrollArea->show();
-  
-  // force layout update
-  m_actionsContainer->updateGeometry();
-  m_actionsLayout->update();
-  m_actionsContainer->adjustSize();
-  
-  // calculate content height
-  int contentHeight = m_actionsContainer->sizeHint().height();
-  if (contentHeight == 0) {
-    // or estimate based on items
-    contentHeight = totalItems * 50; // approx height per item
+  if (totalItems > 0) {
+    m_scrollArea->show();
+    updateBorderRadius(true);
+    updateWindowSize(calculateResultsHeight(totalItems));
+    selectAction(0);
   }
-  
-  // limit to max height
-  int resultsHeight = qMin(contentHeight, m_maxResultsHeight);
-  m_scrollArea->setMaximumHeight(resultsHeight);
-  
-  // window height = margins (32) + search box (60) + spacing (8) + results height
-  int windowHeight = 32 + 60 + 8 + resultsHeight;
-  setFixedSize(700, windowHeight);
-  
-  if (m_positionInitialized) { move(m_fixedPosition); }
-  
-  // autoselect first action
-  if (totalItems > 0) { selectAction(0); }
-  
-  // dont move focus to action
   m_input->setFocus();
 }
 
@@ -308,9 +276,9 @@ void Spotlight::clearActions()
   m_currentSearchResults.clear();
   m_selectedActionIndex = -1;
   m_scrollArea->hide();
-  setFixedSize(700, m_baseHeight);
+  updateBorderRadius(false);
+  setFixedSize(WINDOW_WIDTH, m_baseHeight);
   
-  // maintain position when hiding results
   if (m_positionInitialized) { move(m_fixedPosition); }
 }
 
@@ -520,19 +488,19 @@ bool Spotlight::eventFilter(QObject* obj, QEvent* event)
     }
   }
   
-  // drag events on input container (not QLineEdit)
-  else if (obj == m_inputContainer) {
+  // drag events on unified container (not QLineEdit or result buttons)
+  else if (obj == m_unifiedContainer) {
     if (event->type() == QEvent::MouseButtonPress) {
       auto* mouseEvent = static_cast<QMouseEvent*>(event);
       if (mouseEvent->button() == Qt::LeftButton) {
-        // if click is on QLineEdit let it handle text
+        // if click is on QLineEdit or result buttons, don't drag
         QPoint localPos = mouseEvent->pos();
-        QWidget* child = m_inputContainer->childAt(localPos);
-        // if child on QLineEdit don't drag
+        QWidget* child = m_unifiedContainer->childAt(localPos);
         QWidget* widget = child;
-        while (widget && widget != m_inputContainer) {
-          if (widget == m_input) {
-            // click on QLineEdit let it handle text
+        while (widget && widget != m_unifiedContainer) {
+          if (widget == m_input || widget->property("isResultButton").toBool() || 
+              widget->property("isMenuItem").toBool()) {
+            // click on input or result button, let it handle
             return false;
           }
           widget = widget->parentWidget();
@@ -621,38 +589,22 @@ void Spotlight::showMenuMode(const std::vector<MenuItem>& items)
   m_menuMode = true;
   m_currentMenuItems = items;
   
-  // switch ui to menu mode: hide input, show back button
   m_input->hide();
   m_input->clear();
   m_backButton->show();
-  
   clearActions();
   
-  // create menu item buttons
   for (size_t i = 0; i < items.size(); ++i) {
     createItemButton(items[i].title, items[i].description, static_cast<int>(i), true, items[i].font);
   }
   
-  // show menu
   int totalItems = static_cast<int>(items.size());
   if (totalItems > 0) {
     m_scrollArea->show();
+    updateBorderRadius(true);
     
-    m_actionsContainer->updateGeometry();
-    m_actionsLayout->update();
-    m_actionsContainer->adjustSize();
-    
-    int contentHeight = m_actionsContainer->sizeHint().height();
-    if (contentHeight == 0) { contentHeight = totalItems * 50; }
-    
-    int resultsHeight = qMin(contentHeight, m_maxResultsHeight);
-    m_scrollArea->setMaximumHeight(resultsHeight);
-    
-    int windowHeight = 32 + 60 + 8 + resultsHeight;
-    setFixedSize(700, windowHeight);
-    
-    if (m_positionInitialized) { move(m_fixedPosition); }
-    
+    int resultsHeight = calculateResultsHeight(totalItems);
+    updateWindowSize(resultsHeight);
     selectAction(0);
   }
   
@@ -662,13 +614,10 @@ void Spotlight::showMenuMode(const std::vector<MenuItem>& items)
 void Spotlight::exitMenuMode()
 {
   m_menuMode = false;
-  
-  // switch ui to menu mode: hide back button, show input
   m_backButton->hide();
   m_input->show();
   m_input->clear();
   m_input->setFocus();
-  
   clearActions();
   m_menuItems.clear();
   m_currentMenuItems.clear();
@@ -676,6 +625,48 @@ void Spotlight::exitMenuMode()
 
 void Spotlight::onMenuBackClicked()
 { exitMenuMode(); }
+
+// Helper functions
+void Spotlight::updateBorderRadius(bool hasResults)
+{
+  QString style = QString(
+    "QWidget {"
+    "  background: rgba(40, 40, 40, 250);"
+    "  border-top-left-radius: %1px;"
+    "  border-top-right-radius: %1px;"
+    "  border-bottom-left-radius: %2px;"
+    "  border-bottom-right-radius: %2px;"
+    "}"
+  ).arg(BORDER_RADIUS).arg(hasResults ? 0 : BORDER_RADIUS);
+  
+  m_unifiedContainer->setStyleSheet(style);
+}
+
+int Spotlight::calculateResultsHeight(int totalItems)
+{
+  m_actionsContainer->updateGeometry();
+  m_actionsLayout->update();
+  m_actionsContainer->adjustSize();
+  
+  int contentHeight = m_actionsContainer->sizeHint().height();
+  if (contentHeight == 0) {
+    contentHeight = totalItems * 50; // approx height per item
+  }
+  
+  int resultsHeight = qMin(contentHeight, m_maxResultsHeight);
+  return qMax(resultsHeight, 1); // Minimum 1px to prevent layout issues
+}
+
+void Spotlight::updateWindowSize(int resultsHeight)
+{
+  m_scrollArea->setMaximumHeight(resultsHeight);
+  m_scrollArea->setMinimumHeight(resultsHeight);
+  
+  int windowHeight = MARGIN_TOP + SEARCH_BOX_HEIGHT + resultsHeight + MARGIN_BOTTOM;
+  setFixedSize(WINDOW_WIDTH, windowHeight);
+  
+  if (m_positionInitialized) { move(m_fixedPosition); }
+}
 
 void Spotlight::onMenuItemClicked(int index)
 {

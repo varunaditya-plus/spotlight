@@ -66,12 +66,19 @@ private:
   void onMenuBackClicked();
   void onMenuItemClicked(int index);
   
+  // Helper functions
+  void updateBorderRadius(bool hasResults);
+  void updateWindowSize(int resultsHeight);
+  int calculateResultsHeight(int totalItems);
+  
   QLineEdit* m_input = nullptr;
   QPushButton* m_backButton = nullptr;
-  QWidget* m_inputContainer = nullptr;
+  QWidget* m_unifiedContainer = nullptr; // Unified container for search and results
+  QWidget* m_inputContainer = nullptr; // Input area inside unified container
   QWidget* m_actionsContainer = nullptr;
   QScrollArea* m_scrollArea = nullptr;
   QVBoxLayout* m_actionsLayout = nullptr;
+  QVBoxLayout* m_unifiedLayout = nullptr; // Layout for unified container
   QList<Action*> m_actions;
   QList<QPushButton*> m_searchResults; // buttons for search results
   QList<QPushButton*> m_menuItems; // buttons for menu items
@@ -85,9 +92,15 @@ private:
   QPoint m_fixedPosition;
   bool m_dragging = false;
   bool m_positionInitialized = false;
-  bool m_menuMode = false; // true when showing menu, false when showing search
-  int m_baseHeight = 92; // base height: margins (32) + search box (60)
-  int m_maxResultsHeight = 500; // max height for results before scrolling
+  bool m_menuMode = false;
+  int m_baseHeight = 92; // margins (32) + search box (60)
+  int m_maxResultsHeight = 500;
+  
+  static constexpr int WINDOW_WIDTH = 700;
+  static constexpr int SEARCH_BOX_HEIGHT = 60;
+  static constexpr int MARGIN_TOP = 16;
+  static constexpr int MARGIN_BOTTOM = 16;
+  static constexpr int BORDER_RADIUS = 28;
   
   void launchApp(const SearchResult& result);
   void createItemButton(const QString& title, const QString& description, int index, bool isMenuItem, const QFont& font = QFont());
