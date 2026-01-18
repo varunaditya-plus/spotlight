@@ -2,10 +2,7 @@
 #include <QDesktopServices>
 #include <QUrl>
 
-SearchAction::SearchAction(QWidget* parent)
-  : Action("Search", parent)
-{
-}
+SearchAction::SearchAction(QWidget* parent) : Action("Search", parent) {}
 
 void SearchAction::execute(const QString& query)
 { // add support for other search engines later

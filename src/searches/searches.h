@@ -19,9 +19,7 @@ struct SearchResult
   SearchResult(SearchResult&&) noexcept = default;
   SearchResult& operator=(SearchResult&&) noexcept = default;
   
-  bool operator<(const SearchResult& other) const {
-    return score > other.score; // sort descending by score
-  }
+  bool operator<(const SearchResult& other) const { return score > other.score; }
 };
 
 Q_DECLARE_METATYPE(SearchResult)

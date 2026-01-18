@@ -206,14 +206,10 @@ void Spotlight::updateActions(const QString& query)
   int windowHeight = 32 + 60 + 8 + resultsHeight;
   setFixedSize(700, windowHeight);
   
-  if (m_positionInitialized) {
-    move(m_fixedPosition);
-  }
+  if (m_positionInitialized) { move(m_fixedPosition); }
   
   // autoselect first action
-  if (totalItems > 0) {
-    selectAction(0);
-  }
+  if (totalItems > 0) { selectAction(0); }
   
   // dont move focus to action
   m_input->setFocus();
@@ -235,9 +231,7 @@ void Spotlight::clearActions()
   setFixedSize(700, m_baseHeight);
   
   // maintain position when hiding results
-  if (m_positionInitialized) {
-    move(m_fixedPosition);
-  }
+  if (m_positionInitialized) { move(m_fixedPosition); }
 }
 
 void Spotlight::navigateActions(int direction)
@@ -246,11 +240,8 @@ void Spotlight::navigateActions(int direction)
   if (totalItems == 0) return;
   
   int newIndex = m_selectedActionIndex + direction;
-  if (newIndex < 0) {
-    newIndex = totalItems - 1;
-  } else if (newIndex >= totalItems) {
-    newIndex = 0;
-  }
+  if (newIndex < 0) { newIndex = totalItems - 1; }
+  else if (newIndex >= totalItems) { newIndex = 0; }
   
   selectAction(newIndex);
 }
@@ -333,10 +324,7 @@ void Spotlight::selectAction(int index)
   // keep focus on input field
 }
 
-void Spotlight::onActionExecuted()
-{
-  close();
-}
+void Spotlight::onActionExecuted() { close(); }
 
 bool Spotlight::eventFilter(QObject* obj, QEvent* event)
 {

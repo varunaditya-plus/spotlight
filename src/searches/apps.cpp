@@ -6,10 +6,7 @@
 #include <QProcess>
 #include <algorithm>
 
-AppsSearch::AppsSearch(QObject* parent)
-  : Search(parent)
-{
-}
+AppsSearch::AppsSearch(QObject* parent) : Search(parent) {}
 
 std::vector<SearchResult> AppsSearch::performSearch(const QString& query)
 {
@@ -82,9 +79,7 @@ void AppsSearch::loadApplications()
             break;
           }
         }
-        if (!duplicate) {
-          m_applications.append(app);
-        }
+        if (!duplicate) { m_applications.append(app); }
       }
     }
   }
@@ -119,9 +114,7 @@ AppInfo AppsSearch::parseDesktopFile(const QString& filePath)
       continue;
     }
     
-    if (!isDesktopEntry) {
-      continue;
-    }
+    if (!isDesktopEntry) { continue; }
     
     int eqPos = line.indexOf('=');
     if (eqPos == -1) continue;
@@ -129,33 +122,18 @@ AppInfo AppsSearch::parseDesktopFile(const QString& filePath)
     QString key = line.left(eqPos).trimmed();
     QString value = line.mid(eqPos + 1).trimmed();
     
-    if (key == "Hidden" && value == "true") {
-      isHidden = true;
-    }
-    if (key == "NoDisplay" && value == "true") {
-      noDisplay = true;
-    }
+    if (key == "Hidden" && value == "true") { isHidden = true; }
+    if (key == "NoDisplay" && value == "true") { noDisplay = true; }
     
-    if (key == "Exec") {
-      app.exec = value;
-    }
-    else if (key == "Name") {
-      app.name = value;
-    }
-    else if (key == "Comment" && app.description.isEmpty()) {
-      app.description = value;
-    }
-    else if (key == "Icon") {
-      app.icon = value;
-    }
+    if (key == "Exec") { app.exec = value; }
+    else if (key == "Name") { app.name = value; }
+    else if (key == "Comment" && app.description.isEmpty()) { app.description = value; }
+    else if (key == "Icon") { app.icon = value; }
   }
   
   file.close();
   
-  if (isHidden || noDisplay) {
-    app.name.clear();
-    app.exec.clear();
-  }
+  if (isHidden || noDisplay) { app.name.clear(); app.exec.clear(); }
   
   return app;
 }
