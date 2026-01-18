@@ -1,8 +1,4 @@
 * Search for files by name (documents, images, videos)
-* Search and open applications
-* Search system settings (e.g., toggle dark mode, open specific settings)
-* Search the web via your default browser
-* Show suggestions from the internet
 * Quick answers like calculations and conversions
 
 * Arrow key navigation through results

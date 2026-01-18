@@ -36,6 +36,7 @@ class QScrollArea;
 class Action;
 class QPushButton;
 class AppsSearch;
+class SettingsSearch;
 class SpotlightApp;
 
 class Spotlight : public QDialog
@@ -77,6 +78,7 @@ private:
   std::vector<SearchResult> m_currentSearchResults; // store search results data
   std::vector<MenuItem> m_currentMenuItems; // store menu items data
   AppsSearch* m_appsSearch = nullptr;
+  SettingsSearch* m_settingsSearch = nullptr;
   QHash<QString, SpotlightApp*> m_spotlightApps; // registered spotlight apps
   int m_selectedActionIndex = -1;
   QPoint m_dragStartPos;

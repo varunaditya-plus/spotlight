@@ -29,6 +29,7 @@ add_executable(spotlight
   src/actions/search.cpp
   src/searches/searches.cpp
   src/searches/apps.cpp
+  src/searches/settings.cpp
   src/spotlightapps/utils.cpp
   src/spotlightapps/demo/demoapp.cpp
 )

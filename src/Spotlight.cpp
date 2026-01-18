@@ -3,6 +3,7 @@
 #include "actions/search.h"
 #include "searches/searches.h"
 #include "searches/apps.h"
+#include "searches/settings.h"
 #include "spotlightapps/spotlightapp.h"
 #include "spotlightapps/demo/demoapp.h"
 #include "spotlightapps/utils.h"
@@ -23,6 +24,7 @@
 #include <QFontMetrics>
 #include <QSpacerItem>
 #include <vector>
+#include <algorithm>
 
 // Spotlight apps
 static const QList<SpotlightAppInfo> SPOTLIGHT_APPS = {
@@ -69,7 +71,7 @@ Spotlight::Spotlight(QWidget* parent)
   m_inputContainer->setStyleSheet(
     "QWidget {"
     "  background: rgba(40, 40, 40, 250);"
-    "  border-radius: 12px;"
+    "  border-radius: 28px;"
     "}"
   );
   m_inputContainer->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
@@ -172,6 +174,9 @@ Spotlight::Spotlight(QWidget* parent)
   // initialize apps search
   m_appsSearch = new AppsSearch(this);
   
+  // initialize settings search
+  m_settingsSearch = new SettingsSearch(this);
+  
   // spotlight apps (add more later)
   registerSpotlightApp("demo", new DemoApp());
   
@@ -195,6 +200,14 @@ void Spotlight::updateActions(const QString& query)
   
   // app search
   std::vector<SearchResult> appResults = m_appsSearch->performSearch(query);
+  
+  // settings search
+  std::vector<SearchResult> settingsResults = m_settingsSearch->performSearch(query);
+  
+  // combine all results
+  std::vector<SearchResult> allResults;
+  allResults.insert(allResults.end(), settingsResults.begin(), settingsResults.end());
+  allResults.insert(allResults.end(), appResults.begin(), appResults.end());
   
   // add spotlight apps using registry
   QString lowerQuery = query.toLower();
@@ -222,15 +235,18 @@ void Spotlight::updateActions(const QString& query)
       spotlightAppResult.description = appInfo.description;
       spotlightAppResult.exec = "spotlightapp:" + appInfo.identifier;
       spotlightAppResult.score = score;
-      appResults.insert(appResults.begin(), spotlightAppResult);
+      allResults.push_back(spotlightAppResult);
     }
   }
   
-  m_currentSearchResults = appResults;
+  // sort all results by score (highest first)
+  std::sort(allResults.begin(), allResults.end());
+  
+  m_currentSearchResults = allResults;
   
   // create buttons for search results
-  for (int i = 0; i < appResults.size(); ++i) {
-    createItemButton(appResults[i].name, appResults[i].description, i, false);
+  for (int i = 0; i < allResults.size(); ++i) {
+    createItemButton(allResults[i].name, allResults[i].description, i, false);
   }
   
   // create actions
@@ -536,6 +552,7 @@ bool Spotlight::eventFilter(QObject* obj, QEvent* event)
       auto* mouseEvent = static_cast<QMouseEvent*>(event);
       if (mouseEvent->button() == Qt::LeftButton) {
         m_dragging = false;
+        m_fixedPosition = frameGeometry().topLeft();
         return true;
       }
     }

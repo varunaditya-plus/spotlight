@@ -1,18 +1,18 @@
-#include "apps.h"
+#include "settings.h"
 #include <QDir>
 #include <QFile>
 #include <QTextStream>
 #include <QStandardPaths>
-#include <QProcess>
+#include <QFileInfo>
 #include <algorithm>
 
-AppsSearch::AppsSearch(QObject* parent) : Search(parent) {}
+SettingsSearch::SettingsSearch(QObject* parent) : Search(parent) {}
 
-std::vector<SearchResult> AppsSearch::performSearch(const QString& query)
+std::vector<SearchResult> SettingsSearch::performSearch(const QString& query)
 {
-  if (!m_appsLoaded) {
-    loadApplications();
-    m_appsLoaded = true;
+  if (!m_settingsLoaded) {
+    loadSettings();
+    m_settingsLoaded = true;
   }
   
   std::vector<SearchResult> results;
@@ -23,21 +23,21 @@ std::vector<SearchResult> AppsSearch::performSearch(const QString& query)
   }
   
   // calculate similarity scores
-  for (const auto& app : m_applications) {
-    int score = calculateSimilarity(query, app.name);
+  for (const auto& setting : m_settings) {
+    int score = calculateSimilarity(query, setting.name);
     
     // check description
     if (score < 50) {
-      int descScore = calculateSimilarity(query, app.description);
+      int descScore = calculateSimilarity(query, setting.description);
       score = qMax(score, descScore / 2); // description matches worth less
     }
     
     if (score > 0) {
       SearchResult result;
-      result.name = app.name;
-      result.description = app.description;
-      result.exec = app.exec;
-      result.data = app.desktopFile;
+      result.name = setting.name;
+      result.description = setting.description;
+      result.exec = setting.exec;
+      result.data = setting.desktopFile;
       result.score = score;
       results.push_back(result);
     }
@@ -49,9 +49,9 @@ std::vector<SearchResult> AppsSearch::performSearch(const QString& query)
   return results;
 }
 
-void AppsSearch::loadApplications()
+void SettingsSearch::loadSettings()
 {
-  m_applications.clear();
+  m_settings.clear();
   
   QStringList dirs = getDesktopFileDirectories();
   
@@ -60,34 +60,37 @@ void AppsSearch::loadApplications()
     if (!dir.exists()) continue;
     
     QStringList filters;
-    filters << "*.desktop";
+    filters << "gnome-*-panel.desktop";
     
-    QFileInfoList files = dir.entryInfoList(filters, QDir::Files);
+    QFileInfoList files = dir.entryInfoList(filters, QDir::Files, QDir::Name);
     
     for (const QFileInfo& fileInfo : files) {
-      AppInfo app = parseDesktopFile(fileInfo.absoluteFilePath());
-      if (!app.name.isEmpty() && !app.exec.isEmpty()) {
+      SettingsInfo setting = parseDesktopFile(fileInfo.absoluteFilePath());
+      
+      if (!setting.name.isEmpty() && !setting.exec.isEmpty()) {
         bool duplicate = false;
-        for (const auto& existing : m_applications) {
-          if (existing.name == app.name) {
+        for (const auto& existing : m_settings) {
+          if (existing.name == setting.name) {
             duplicate = true;
             break;
           }
         }
-        if (!duplicate) { m_applications.append(app); }
+        if (!duplicate) { 
+          m_settings.append(setting); 
+        }
       }
     }
   }
 }
 
-AppInfo AppsSearch::parseDesktopFile(const QString& filePath)
+SettingsInfo SettingsSearch::parseDesktopFile(const QString& filePath)
 {
-  AppInfo app;
-  app.desktopFile = filePath;
+  SettingsInfo setting;
+  setting.desktopFile = filePath;
   
   QFile file(filePath);
   if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) {
-    return app;
+    return setting;
   }
   
   QTextStream in(&file);
@@ -120,41 +123,35 @@ AppInfo AppsSearch::parseDesktopFile(const QString& filePath)
     if (key == "Hidden" && value == "true") { isHidden = true; }
     if (key == "NoDisplay" && value == "true") { noDisplay = true; }
     
-    if (key == "Exec") { app.exec = value; }
-    else if (key == "Name") { app.name = value; }
-    else if (key == "Comment" && app.description.isEmpty()) { app.description = value; }
-    else if (key == "Icon") { app.icon = value; }
+    if (key == "Exec") { setting.exec = value; }
+    else if (key == "Name" && setting.name.isEmpty()) { 
+      // use first Name field (usually the default/English one)
+      setting.name = value; 
+    }
+    else if (key == "Comment" && setting.description.isEmpty()) { 
+      setting.description = value; 
+    }
   }
   
   file.close();
   
-  if (isHidden || noDisplay) { app.name.clear(); app.exec.clear(); }
+  // unly filter out Hidden=true cause NoDisplay=true only hides from menus but should still be searchable
+  if (isHidden) { 
+    setting.name.clear(); 
+    setting.exec.clear(); 
+  }
   
-  return app;
+  return setting;
 }
 
-QStringList AppsSearch::getDesktopFileDirectories()
+QStringList SettingsSearch::getDesktopFileDirectories()
 {
   QStringList dirs;
   
-  // user-specific applications
-  QString userAppsDir = QStandardPaths::writableLocation(QStandardPaths::ApplicationsLocation);
-  if (!userAppsDir.isEmpty()) {
-    dirs.append(userAppsDir);
-  }
-  
-  // system-wide applications from XDG_DATA_DIRS
-  QStringList dataDirs = QStandardPaths::standardLocations(QStandardPaths::ApplicationsLocation);
-  for (const QString& dir : dataDirs) {
-    if (!dirs.contains(dir)) {
-      dirs.append(dir);
-    }
-  }
-  
+  // system-wide apps
   QStringList commonDirs = {
     "/usr/share/applications",
-    "/usr/local/share/applications",
-    QDir::homePath() + "/.local/share/applications"
+    "/usr/local/share/applications"
   };
   
   for (const QString& dir : commonDirs) {
