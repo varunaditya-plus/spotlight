@@ -1,11 +1,16 @@
 #pragma once
 #include <QDialog>
 #include <QPoint>
+#include <vector>
+#include "searches/searches.h"
 
 class QLineEdit;
 class QWidget;
 class QVBoxLayout;
+class QScrollArea;
 class Action;
+class QPushButton;
+class AppsSearch;
 
 class Spotlight : public QDialog
 {
@@ -29,10 +34,20 @@ private:
   QLineEdit* m_input = nullptr;
   QWidget* m_inputContainer = nullptr;
   QWidget* m_actionsContainer = nullptr;
+  QScrollArea* m_scrollArea = nullptr;
   QVBoxLayout* m_actionsLayout = nullptr;
   QList<Action*> m_actions;
+  QList<QPushButton*> m_searchResults; // buttons for search results
+  std::vector<SearchResult> m_currentSearchResults; // store search results data
+  AppsSearch* m_appsSearch = nullptr;
   int m_selectedActionIndex = -1;
   QPoint m_dragStartPos;
+  QPoint m_fixedPosition;
   bool m_dragging = false;
-  int m_baseHeight = 80;
+  bool m_positionInitialized = false;
+  int m_baseHeight = 92; // base height: margins (32) + search box (60)
+  int m_maxResultsHeight = 500; // max height for results before scrolling
+  
+  void launchApp(const SearchResult& result);
+  void createSearchResultButton(const SearchResult& result, int index);
 };

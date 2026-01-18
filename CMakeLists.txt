@@ -27,6 +27,8 @@ add_executable(spotlight
   src/Spotlight.cpp
   src/actions/actions.cpp
   src/actions/search.cpp
+  src/searches/searches.cpp
+  src/searches/apps.cpp
 )
 target_link_libraries(spotlight PRIVATE Qt6::Widgets)
 

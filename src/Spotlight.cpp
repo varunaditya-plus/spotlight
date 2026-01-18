@@ -1,11 +1,24 @@
 #include "Spotlight.h"
 #include "actions/actions.h"
 #include "actions/search.h"
+#include "searches/searches.h"
+#include "searches/apps.h"
 #include <QKeyEvent>
 #include <QLineEdit>
 #include <QVBoxLayout>
 #include <QMouseEvent>
-#include <QMoveEvent>
+#include <QProcess>
+#include <QFileInfo>
+#include <QFrame>
+#include <QSizePolicy>
+#include <QScrollArea>
+#include <QScreen>
+#include <QApplication>
+#include <QLabel>
+#include <QHBoxLayout>
+#include <QFontMetrics>
+#include <QSpacerItem>
+#include <vector>
 
 Spotlight::Spotlight(QWidget* parent)
   : QDialog(parent)
@@ -14,9 +27,9 @@ Spotlight::Spotlight(QWidget* parent)
   setAttribute(Qt::WA_TranslucentBackground);
   
   setStyleSheet(
-    "QDialog { background: rgba(30, 30, 30, 240); border-radius: 12px; }"
+    "QDialog { background: transparent; }"
     "QLineEdit {"
-    "  font-size: 18px;"
+    "  font-size: 20px;"
     "  padding: 0px;"
     "  color: white;"
     "  background: transparent;"
@@ -24,18 +37,14 @@ Spotlight::Spotlight(QWidget* parent)
     "}"
     "QPushButton {"
     "  font-size: 16px;"
-    "  padding: 10px;"
+    "  padding: 12px 16px;"
     "  color: white;"
-    "  background: rgba(255, 255, 255, 30);"
-    "  border-left: 1px solid rgba(255, 255, 255, 50);"
-    "  border-right: 1px solid rgba(255, 255, 255, 50);"
-    "  border-bottom: 1px solid rgba(255, 255, 255, 50);"
-    "  border-top: none;"
-    "  border-radius: 0px;"
+    "  background: transparent;"
+    "  border: none;"
     "  text-align: left;"
     "}"
     "QPushButton:hover {"
-    "  background: rgba(255, 255, 255, 40);"
+    "  background: rgba(255, 255, 255, 10);"
     "}"
     "QPushButton:focus {"
     "  outline: none;"
@@ -43,26 +52,23 @@ Spotlight::Spotlight(QWidget* parent)
   );
   
   auto* layout = new QVBoxLayout(this);
-  layout->setContentsMargins(20, 20, 20, 20);
-  layout->setSpacing(0);
+  layout->setContentsMargins(16, 16, 16, 16);
+  layout->setSpacing(8);
   
   // draggable container
   m_inputContainer = new QWidget(this);
   m_inputContainer->setStyleSheet(
     "QWidget {"
-    "  background: rgba(255, 255, 255, 30);"
-    "  border: 1px solid rgba(255, 255, 255, 50);"
-    "  border-top-left-radius: 8px;"
-    "  border-top-right-radius: 8px;"
-    "  border-bottom-left-radius: 0px;"
-    "  border-bottom-right-radius: 0px;"
-    "  border-bottom: none;"
+    "  background: rgba(40, 40, 40, 250);"
+    "  border-radius: 12px;"
     "}"
   );
+  m_inputContainer->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+  m_inputContainer->setFixedHeight(60);
   m_inputContainer->installEventFilter(this);
   
   auto* inputLayout = new QVBoxLayout(m_inputContainer);
-  inputLayout->setContentsMargins(12, 12, 12, 12);
+  inputLayout->setContentsMargins(20, 16, 20, 16);
   inputLayout->setSpacing(0);
   
   m_input = new QLineEdit(m_inputContainer);
@@ -82,14 +88,61 @@ Spotlight::Spotlight(QWidget* parent)
   
   layout->addWidget(m_inputContainer);
   
-  m_actionsContainer = new QWidget(this);
-  m_actionsLayout = new QVBoxLayout(m_actionsContainer);
-  m_actionsLayout->setContentsMargins(0, 0, 0, 0);
-  m_actionsLayout->setSpacing(0);
-  m_actionsContainer->hide();
-  layout->addWidget(m_actionsContainer);
+  // results container with scroll area
+  QScrollArea* scrollArea = new QScrollArea(this);
+  scrollArea->setWidgetResizable(true);
+  scrollArea->setFrameShape(QFrame::NoFrame);
+  scrollArea->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+  scrollArea->setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
+  scrollArea->setStyleSheet(
+    "QScrollArea {"
+    "  background: transparent;"
+    "  border: none;"
+    "}"
+    "QScrollBar:vertical {"
+    "  background: rgba(255, 255, 255, 15);"
+    "  width: 6px;"
+    "  border-radius: 3px;"
+    "}"
+    "QScrollBar::handle:vertical {"
+    "  background: rgba(255, 255, 255, 50);"
+    "  border-radius: 3px;"
+    "  min-height: 20px;"
+    "}"
+    "QScrollBar::handle:vertical:hover {"
+    "  background: rgba(255, 255, 255, 70);"
+    "}"
+  );
   
-  resize(500, m_baseHeight);
+  m_actionsContainer = new QWidget();
+  m_actionsContainer->setStyleSheet(
+    "QWidget {"
+    "  background: rgba(40, 40, 40, 250);"
+    "  border-radius: 12px;"
+    "}"
+  );
+  m_actionsLayout = new QVBoxLayout(m_actionsContainer);
+  m_actionsLayout->setContentsMargins(4, 4, 4, 4);
+  m_actionsLayout->setSpacing(0);
+  
+  scrollArea->setWidget(m_actionsContainer);
+  scrollArea->hide();
+  m_scrollArea = scrollArea;
+  layout->addWidget(scrollArea);
+  
+  // set fixed size and center on screen
+  // base height = margins (32) + search box (60) = 92
+  m_baseHeight = 92;
+  setFixedSize(700, m_baseHeight);
+  QScreen* screen = QApplication::primaryScreen();
+  QRect screenGeometry = screen->geometry();
+  QPoint center = screenGeometry.center() - QPoint(350, m_baseHeight / 2);
+  move(center);
+  m_fixedPosition = center;
+  m_positionInitialized = true;
+  
+  // initialize apps search
+  m_appsSearch = new AppsSearch(this);
   
   connect(m_input, &QLineEdit::textChanged, this, &Spotlight::onTextChanged);
 }
@@ -107,6 +160,15 @@ void Spotlight::updateActions(const QString& query)
 {
   clearActions();
   
+  // app search
+  std::vector<SearchResult> appResults = m_appsSearch->performSearch(query);
+  m_currentSearchResults = appResults;
+  
+  // create buttons for search results
+  for (int i = 0; i < appResults.size(); ++i) {
+    createSearchResultButton(appResults[i], i);
+  }
+  
   // create actions
   auto* searchAction = new SearchAction(m_actionsContainer);
   searchAction->setText("Search " + query);
@@ -118,13 +180,38 @@ void Spotlight::updateActions(const QString& query)
   m_actions.append(searchAction);
   m_actionsLayout->addWidget(searchAction);
   
+  // calculate total items
+  int totalItems = m_searchResults.size() + m_actions.size();
+  
   // show actions and lower area
-  m_actionsContainer->show();
-  int actionHeight = 50 * m_actions.size();
-  resize(500, m_baseHeight + actionHeight);
+  m_scrollArea->show();
+  
+  // force layout update
+  m_actionsContainer->updateGeometry();
+  m_actionsLayout->update();
+  m_actionsContainer->adjustSize();
+  
+  // calculate content height
+  int contentHeight = m_actionsContainer->sizeHint().height();
+  if (contentHeight == 0) {
+    // or estimate based on items
+    contentHeight = totalItems * 50; // approx height per item
+  }
+  
+  // limit to max height
+  int resultsHeight = qMin(contentHeight, m_maxResultsHeight);
+  m_scrollArea->setMaximumHeight(resultsHeight);
+  
+  // window height = margins (32) + search box (60) + spacing (8) + results height
+  int windowHeight = 32 + 60 + 8 + resultsHeight;
+  setFixedSize(700, windowHeight);
+  
+  if (m_positionInitialized) {
+    move(m_fixedPosition);
+  }
   
   // autoselect first action
-  if (!m_actions.isEmpty()) {
+  if (totalItems > 0) {
     selectAction(0);
   }
   
@@ -141,19 +228,27 @@ void Spotlight::clearActions()
   }
   
   m_actions.clear();
+  m_searchResults.clear();
+  m_currentSearchResults.clear();
   m_selectedActionIndex = -1;
-  m_actionsContainer->hide();
-  resize(500, m_baseHeight);
+  m_scrollArea->hide();
+  setFixedSize(700, m_baseHeight);
+  
+  // maintain position when hiding results
+  if (m_positionInitialized) {
+    move(m_fixedPosition);
+  }
 }
 
 void Spotlight::navigateActions(int direction)
 {
-  if (m_actions.isEmpty()) return;
+  int totalItems = m_searchResults.size() + m_actions.size();
+  if (totalItems == 0) return;
   
   int newIndex = m_selectedActionIndex + direction;
   if (newIndex < 0) {
-    newIndex = m_actions.size() - 1;
-  } else if (newIndex >= m_actions.size()) {
+    newIndex = totalItems - 1;
+  } else if (newIndex >= totalItems) {
     newIndex = 0;
   }
   
@@ -162,51 +257,79 @@ void Spotlight::navigateActions(int direction)
 
 void Spotlight::selectAction(int index)
 {
-  if (index < 0 || index >= m_actions.size()) return;
+  int totalItems = m_searchResults.size() + m_actions.size();
+  if (index < 0 || index >= totalItems) return;
+  
+  // get button to style
+  QPushButton* prevButton = nullptr;
+  QPushButton* newButton = nullptr;
   
   // deselect previous
-  if (m_selectedActionIndex >= 0 && m_selectedActionIndex < m_actions.size()) {
-    int prevIndex = m_selectedActionIndex;
-    QString baseStyle = 
-      "QPushButton {"
-      "  font-size: 16px;"
-      "  padding: 10px;"
-      "  color: white;"
-      "  background: rgba(255, 255, 255, 30);"
-      "  border-left: 1px solid rgba(255, 255, 255, 50);"
-      "  border-right: 1px solid rgba(255, 255, 255, 50);"
-      "  border-bottom: 1px solid rgba(255, 255, 255, 50);"
-      "  border-top: " + QString(prevIndex == 0 ? "1px" : "none") + " solid rgba(255, 255, 255, 50);"
-      "  border-top-left-radius: 0px;"
-      "  border-top-right-radius: 0px;"
-      "  border-bottom-left-radius: " + QString(prevIndex == m_actions.size() - 1 ? "8px" : "0px") + ";"
-      "  border-bottom-right-radius: " + QString(prevIndex == m_actions.size() - 1 ? "8px" : "0px") + ";"
-      "  text-align: left;"
-      "}";
-    
-    m_actions[prevIndex]->setStyleSheet(baseStyle);
+  if (m_selectedActionIndex >= 0 && m_selectedActionIndex < totalItems) {
+    if (m_selectedActionIndex < m_searchResults.size()) {
+      prevButton = m_searchResults[m_selectedActionIndex];
+    } else {
+      prevButton = m_actions[m_selectedActionIndex - m_searchResults.size()];
+    }
   }
   
   // select new
-  m_selectedActionIndex = index;
-  QString selectedStyle = 
-    "QPushButton {"
-    "  font-size: 16px;"
-    "  padding: 10px;"
-    "  color: white;"
-    "  background: rgba(100, 150, 255, 150);"
-    "  border-left: 1px solid rgba(100, 150, 255, 200);"
-    "  border-right: 1px solid rgba(100, 150, 255, 200);"
-    "  border-bottom: 1px solid rgba(100, 150, 255, 200);"
-    "  border-top: " + QString(index == 0 ? "1px" : "none") + " solid rgba(100, 150, 255, 200);"
-    "  border-top-left-radius: 0px;"
-    "  border-top-right-radius: 0px;"
-    "  border-bottom-left-radius: " + QString(index == m_actions.size() - 1 ? "8px" : "0px") + ";"
-    "  border-bottom-right-radius: " + QString(index == m_actions.size() - 1 ? "8px" : "0px") + ";"
-    "  text-align: left;"
-    "}";
+  if (index < m_searchResults.size()) {
+    newButton = m_searchResults[index];
+  } else {
+    newButton = m_actions[index - m_searchResults.size()];
+  }
   
-  m_actions[m_selectedActionIndex]->setStyleSheet(selectedStyle);
+  // apply base style to previous button
+  if (prevButton) {
+    QWidget* prevWidget = qobject_cast<QWidget*>(prevButton);
+    if (prevWidget && prevWidget->property("isResultButton").toBool()) {
+      // result widget
+      prevWidget->setStyleSheet(
+        "QWidget {"
+        "  background: transparent;"
+        "}"
+      );
+    } else {
+      // regular action button
+      QString baseStyle = 
+        "QPushButton {"
+        "  font-size: 16px;"
+        "  padding: 12px 16px;"
+        "  color: white;"
+        "  background: transparent;"
+        "  border: none;"
+        "  text-align: left;"
+        "}";
+      prevButton->setStyleSheet(baseStyle);
+    }
+  }
+  
+  // apply selected style to new button
+  m_selectedActionIndex = index;
+  if (newButton) {
+    QWidget* newWidget = qobject_cast<QWidget*>(newButton);
+    if (newWidget && newWidget->property("isResultButton").toBool()) {
+      // result widget
+      newWidget->setStyleSheet(
+        "QWidget {"
+        "  background: rgba(100, 150, 255, 80);"
+        "}"
+      );
+    } else {
+      QString selectedStyle = 
+        "QPushButton {"
+        "  font-size: 16px;"
+        "  padding: 12px 16px;"
+        "  color: white;"
+        "  background: rgba(100, 150, 255, 80);"
+        "  border: none;"
+        "  text-align: left;"
+        "}";
+      newButton->setStyleSheet(selectedStyle);
+    }
+  }
+  
   // keep focus on input field
 }
 
@@ -234,15 +357,38 @@ bool Spotlight::eventFilter(QObject* obj, QEvent* event)
         return true;
       }
       else if (keyEvent->key() == Qt::Key_Return || keyEvent->key() == Qt::Key_Enter) {
-        if (m_selectedActionIndex >= 0 && m_selectedActionIndex < m_actions.size()) {
-          QString query = m_input->text();
-          m_actions[m_selectedActionIndex]->execute(query);
+        int totalItems = m_searchResults.size() + m_actions.size();
+        if (m_selectedActionIndex >= 0 && m_selectedActionIndex < totalItems) {
+          if (m_selectedActionIndex < m_searchResults.size()) {
+            // search result
+            launchApp(m_currentSearchResults[m_selectedActionIndex]);
+          } else {
+            // action
+            QString query = m_input->text();
+            m_actions[m_selectedActionIndex - m_searchResults.size()]->execute(query);
+          }
           close();
           return true;
         }
       }
     }
   }
+  
+  // Click events on result buttons
+  if (obj->property("isResultButton").toBool()) {
+    if (event->type() == QEvent::MouseButtonPress) {
+      auto* mouseEvent = static_cast<QMouseEvent*>(event);
+      if (mouseEvent->button() == Qt::LeftButton) {
+        int index = obj->property("resultIndex").toInt();
+        if (index >= 0 && index < static_cast<int>(m_currentSearchResults.size())) {
+          launchApp(m_currentSearchResults[index]);
+          close();
+        }
+        return true;
+      }
+    }
+  }
+  
   // drag events on input container (not QLineEdit)
   else if (obj == m_inputContainer) {
     if (event->type() == QEvent::MouseButtonPress) {
@@ -280,4 +426,107 @@ bool Spotlight::eventFilter(QObject* obj, QEvent* event)
     }
   }
   return QDialog::eventFilter(obj, event);
+}
+
+void Spotlight::createSearchResultButton(const SearchResult& result, int index)
+{
+  // create clickable widget
+  QWidget* buttonWidget = new QWidget(m_actionsContainer);
+  buttonWidget->setCursor(Qt::PointingHandCursor);
+  
+  // create horizontal layout
+  QHBoxLayout* contentLayout = new QHBoxLayout(buttonWidget);
+  contentLayout->setContentsMargins(16, 12, 16, 12);
+  contentLayout->setSpacing(8);
+  
+  // name label with ellipsis
+  QLabel* nameLabel = new QLabel(result.name, buttonWidget);
+  nameLabel->setStyleSheet(
+    "QLabel {"
+    "  color: white;"
+    "  font-size: 16px;"
+    "  background: transparent;"
+    "}"
+  );
+  nameLabel->setTextFormat(Qt::PlainText);
+  QFontMetrics nameMetrics(nameLabel->font());
+  QString elidedName = nameMetrics.elidedText(result.name, Qt::ElideRight, 300);
+  nameLabel->setText(elidedName);
+  nameLabel->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Preferred);
+  contentLayout->addWidget(nameLabel, 0);
+  
+  // description label with ellipsis
+  if (!result.description.isEmpty()) {
+    QLabel* descLabel = new QLabel(result.description, buttonWidget);
+    descLabel->setStyleSheet(
+      "QLabel {"
+      "  color: rgba(255, 255, 255, 140);"
+      "  font-size: 14px;"
+      "  background: transparent;"
+      "}"
+    );
+    descLabel->setTextFormat(Qt::PlainText);
+    QFontMetrics descMetrics(descLabel->font());
+    QString elidedDesc = descMetrics.elidedText(result.description, Qt::ElideRight, 300);
+    descLabel->setText(elidedDesc);
+    descLabel->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
+    contentLayout->addWidget(descLabel, 1);
+  } else {
+    // add spacer if no description
+    contentLayout->addItem(new QSpacerItem(0, 0, QSizePolicy::Expanding, QSizePolicy::Minimum));
+  }
+  
+  // make it clickable
+  buttonWidget->installEventFilter(this);
+  buttonWidget->setProperty("isResultButton", true);
+  buttonWidget->setProperty("resultIndex", index);
+  
+  // store as QPushButton* for compatibility
+  m_searchResults.append(reinterpret_cast<QPushButton*>(buttonWidget));
+  m_actionsLayout->addWidget(buttonWidget);
+}
+
+void Spotlight::launchApp(const SearchResult& result)
+{
+  if (result.exec.isEmpty()) return;
+  
+  // use desktop file if available
+  if (!result.data.isEmpty() && result.data.endsWith(".desktop")) {
+    QFileInfo fileInfo(result.data);
+    QString basename = fileInfo.baseName();
+    
+    // try gtk-launch first
+    bool launched = QProcess::startDetached("gtk-launch", QStringList() << basename);
+    if (launched) {
+      emit onActionExecuted();
+      return;
+    }
+  }
+  
+  // fallback: use exec command directly
+  QString execCmd = result.exec;
+  
+  // remove desktop file % codes
+  execCmd.replace("%f", "");
+  execCmd.replace("%F", "");
+  execCmd.replace("%u", "");
+  execCmd.replace("%U", "");
+  execCmd.replace("%i", "");
+  execCmd.replace("%c", result.name);
+  execCmd.replace("%k", "");
+  
+  // split into command and arguments
+  QStringList parts = execCmd.split(" ", Qt::SkipEmptyParts);
+  if (!parts.isEmpty()) {
+    QString program = parts[0];
+    QStringList args;
+    for (int i = 1; i < parts.size(); ++i) {
+      if (!parts[i].startsWith("%")) {
+        args << parts[i];
+      }
+    }
+    QProcess::startDetached(program, args);
+  }
+  
+  emit onActionExecuted();
 }
